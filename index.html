@@ -25,26 +25,33 @@
 </div>
 <script>(function(){
 var AC=window.AudioContext||window.webkitAudioContext;
-var ac,master,reverb,reverbGain,delayL,delayR,analyser,eq;
+var ac,master,reverb,reverbGain,analyser,eqBass,eqTreble;
 var started=false,playing=false,si=0,ti=0,chord=false;
 var tp={treble:0,pitch:0,strange:0,warmth:0,density:0};
 var timers=[],C=document.getElementById('c'),X=C.getContext('2d');
 var N=24,pts=[],en=0,sm=0;
 for(var i=0;i<N;i++)pts.push({a:(i/N)*Math.PI*2,r:0.4,v:0,p1:Math.random()*6.28,p2:Math.random()*6.28});
 
+// Each scale spans multiple octaves with actual melodic variety
 var SCALES=[
-  ['C2','G2','C3','E3','G3','B3','D4','G4','B4'],
-  ['D2','A2','D3','F3','A3','C4','D4','F4','A4'],
-  ['F2','C3','F3','A3','C4','E4','G4','A4','C5'],
-  ['A2','E3','A3','C4','D4','E4','G4','A4'],
-  ['C2','G2','C3','Eb3','F3','G3','Bb3','C4'],
-  ['C3','D3','E3','F#3','G#3','A#3','C4']
+  // pentatonic — low, mid, high register all different notes
+  ['C2','E2','G2','B2','D3','E3','G3','B3','D4','E4','G4','B4','D5'],
+  // dorian
+  ['D2','F2','A2','C3','D3','F3','A3','C4','D4','F4','A4','C5'],
+  // lydian
+  ['F2','A2','C3','E3','F3','A3','C4','E4','F4','A4','C5','E5'],
+  // minor pentatonic
+  ['A2','C3','D3','E3','G3','A3','C4','D4','E4','G4','A4','C5'],
+  // blues
+  ['C2','Eb2','F2','G2','Bb2','C3','Eb3','F3','G3','Bb3','C4','Eb4'],
+  // whole tone
+  ['C3','D3','E3','F#3','G#3','A#3','C4','D4','E4','F#4','G#4']
 ];
 var SNAMES=['pentatonic','dorian','lydian','minor pent','blues','whole tone'];
 var WTYPES=['sine','triangle','sawtooth'];
 var WNAMES=['sine','triangle','saw'];
-var CHORDS=[[0],[0,7],[0,4,7],[0,3,7],[0,7,12],[0,4,7,11]];
 
+// Separate note pools per register — so layers pick from DIFFERENT octave ranges
 function noteHz(note){
   var m=note.match(/([A-G]#?b?)(d)/);if(!m)return 220;
   var ns={C:0,'C#':1,Db:1,D:2,'D#':3,Eb:3,E:4,F:5,'F#':6,Gb:6,G:7,'G#':8,Ab:8,A:9,'A#':10,Bb:10,B:11};
@@ -52,6 +59,31 @@ function noteHz(note){
 }
 
 function gp(id){return parseFloat(document.getElementById(id).value);}
+
+// Split scale into low/mid/high register pools
+function registers(){
+  var sc=SCALES[si];
+  var sh=Math.round(tp.pitch/3);
+  var low=[],mid=[],high=[];
+  sc.forEach(function(n){
+    var m=n.match(/([A-G#b]+)(d)/);if(!m)return;
+    var oct=+m[2]+sh;
+    var note=m[1]+Math.max(1,Math.min(7,oct));
+    if(oct<=2)low.push(note);
+    else if(oct<=3)mid.push(note);
+    else high.push(note);
+  });
+  if(!low.length)low=mid.slice(0,2);
+  if(!high.length)high=mid.slice(-2);
+  return {low:low,mid:mid,high:high,all:sc.map(function(n){var m=n.match(/([A-G#b]+)(d)/);if(!m)return n;return m[1]+Math.max(1,Math.min(7,+m[2]+sh));})};
+}
+
+function pickFrom(pool,count){
+  count=Math.min(pool.length,count||1);
+  var res=[],used={},tries=0;
+  while(res.length<count&&tries<30){tries++;var i=Math.floor(Math.random()*pool.length);if(!used[i]){used[i]=1;res.push(pool[i]);}}
+  return res.length?res:[pool[0]];
+}
 
 function makeReverb(secs){
   var len=ac.sampleRate*secs,buf=ac.createBuffer(2,len,ac.sampleRate);
@@ -61,152 +93,121 @@ function makeReverb(secs){
 
 function buildGraph(){
   master=ac.createGain();master.gain.value=gp('sVol');
-  // EQ
-  var bass=ac.createBiquadFilter();bass.type='lowshelf';bass.frequency.value=200;bass.gain.value=2;
-  var trebleF=ac.createBiquadFilter();trebleF.type='highshelf';trebleF.frequency.value=4000;trebleF.gain.value=-2;
-  // Stereo delay for width
-  delayL=ac.createDelay(4);delayL.delayTime.value=0.37;
-  delayR=ac.createDelay(4);delayR.delayTime.value=0.52;
-  var dFbL=ac.createGain();dFbL.gain.value=0.35;
-  var dFbR=ac.createGain();dFbR.gain.value=0.35;
-  delayL.connect(dFbL);dFbL.connect(delayL);
-  delayR.connect(dFbR);dFbR.connect(delayR);
-  // Reverb
+  eqBass=ac.createBiquadFilter();eqBass.type='lowshelf';eqBass.frequency.value=250;eqBass.gain.value=2;
+  eqTreble=ac.createBiquadFilter();eqTreble.type='highshelf';eqTreble.frequency.value=3500;eqTreble.gain.value=-1;
   reverb=makeReverb(14);
   reverbGain=ac.createGain();reverbGain.gain.value=gp('sRev');
-  // Analyser
   analyser=ac.createAnalyser();analyser.fftSize=256;
-  // Chain
-  master.connect(bass);bass.connect(trebleF);
-  trebleF.connect(delayL);trebleF.connect(delayR);
-  trebleF.connect(reverb);
-  delayL.connect(analyser);delayR.connect(analyser);
-  reverb.connect(reverbGain);reverbGain.connect(analyser);
+  var dly=ac.createDelay(3);dly.delayTime.value=0.42;
+  var dlyFb=ac.createGain();dlyFb.gain.value=0.3;
+  dly.connect(dlyFb);dlyFb.connect(dly);
+  master.connect(eqBass);eqBass.connect(eqTreble);
+  eqTreble.connect(dly);eqTreble.connect(reverb);
+  dly.connect(analyser);reverb.connect(reverbGain);reverbGain.connect(analyser);
   analyser.connect(ac.destination);
-  window._eq={bass:bass,treble:trebleF};
 }
 
-// Play a note with multiple detuned oscillators for richness
-function playVoice(freq, dur, vol, type, detune){
+function playNote(freq, dur, vol, type, detune){
   if(!ac||!playing)return;
   var now=ac.currentTime;
-  var atk=6+Math.random()*4, rel=16+Math.random()*8;
-  var count=type==='sine'?3:2;
+  var atk=5+Math.random()*5, rel=14+Math.random()*8;
+  if(dur<atk+rel+1)dur=atk+rel+2;
   var g=ac.createGain();
-  g.gain.setValueAtTime(0,now);
+  g.gain.setValueAtTime(0.0001,now);
   g.gain.linearRampToValueAtTime(vol,now+atk);
   g.gain.setValueAtTime(vol,now+dur-rel);
   g.gain.exponentialRampToValueAtTime(0.0001,now+dur);
+  // 2-3 slightly detuned oscillators for warmth
+  var count=type==='sawtooth'?2:3;
   for(var i=0;i<count;i++){
     var o=ac.createOscillator();
     o.type=type||'sine';
     o.frequency.value=freq;
-    o.detune.value=(i-Math.floor(count/2))*(detune||8)+Math.random()*4-2;
-    // slow LFO on frequency for shimmer
+    o.detune.value=(i===0?0:i===1?+(detune||6):-(detune||6))+Math.random()*3-1.5;
+    // micro LFO for gentle shimmer
     var lfo=ac.createOscillator();
     var lfoG=ac.createGain();
-    lfo.frequency.value=0.1+Math.random()*0.15;
-    lfoG.gain.value=freq*0.003;
+    lfo.frequency.value=0.08+Math.random()*0.12;
+    lfoG.gain.value=freq*0.004;
     lfo.connect(lfoG);lfoG.connect(o.frequency);
     lfo.start(now);lfo.stop(now+dur);
     o.connect(g);o.start(now);o.stop(now+dur);
+    o.onended=function(){try{g.disconnect();}catch(e){}};
   }
   g.connect(master);
-}
-
-function getPool(){
-  var sc=SCALES[si].slice();
-  var sh=Math.round(tp.pitch/3);
-  if(sh===0)return sc;
-  return sc.map(function(n){var m=n.match(/([A-G#b]+)(d)/);return m?m[1]+Math.max(1,Math.min(7,+m[2]+sh)):n;});
-}
-
-function pickFreqs(){
-  var pool=getPool();
-  if(chord){
-    var ri=Math.floor(Math.random()*pool.length);
-    var root=pool[ri],mm=root.match(/([A-G#b]+)(d)/);
-    if(!mm)return[noteHz(pool[ri])];
-    var ro=+mm[2];
-    var allN=SCALES[si].map(function(n){return n.replace(/d/,'');});
-    var ct=CHORDS[Math.floor(Math.random()*CHORDS.length)];
-    return ct.map(function(s){var ni=(ri+s)%allN.length,eo=Math.floor((ri+s)/allN.length);return noteHz(allN[ni]+(ro+eo));});
-  }
-  var cnt=1+Math.max(0,Math.round(tp.density/2))+Math.floor(Math.random()*2);
-  cnt=Math.min(pool.length,cnt);
-  var res=[],used={},tries=0;
-  while(res.length<cnt&&tries<20){tries++;var idx=Math.floor(Math.random()*pool.length);if(!used[idx]){used[idx]=1;res.push(noteHz(pool[idx]));}}
-  return res.length?res:[noteHz(pool[0])];
 }
 
 function schedule(){
   if(!playing)return;
   var r=gp('sRate');
   var interval=(3+(3-r)*6)*1000;
+  var reg=registers();
+  var cnt=1+Math.max(0,Math.round(tp.density/2));
 
-  // Layer 1: main drone — detuned sines, very long
-  var freqs=pickFreqs();
-  freqs.forEach(function(f){
-    playVoice(f,20+Math.random()*12,0.12,WTYPES[ti],10);
+  // Layer 1: DRONE — picks from MID register, 1-2 notes
+  var droneNotes=pickFrom(reg.mid,cnt);
+  droneNotes.forEach(function(n){
+    playNote(noteHz(n),20+Math.random()*12,0.13,WTYPES[ti],8);
   });
 
-  // Layer 2: shimmer — higher octave, quieter, slightly offset
+  // Layer 2: SHIMMER — picks from HIGH register independently
   if(Math.random()<0.7){
     setTimeout(function(){
       if(!playing)return;
-      var f=pickFreqs()[0]*2;
-      playVoice(f,14+Math.random()*10,0.055,'sine',5);
-    },1200+Math.random()*1500);
+      var n=pickFrom(reg.high,1)[0];
+      playNote(noteHz(n),14+Math.random()*10,0.06,'sine',4);
+    },800+Math.random()*1500);
   }
 
-  // Layer 3: sub bass — very low, very slow attack
+  // Layer 3: SUB — picks from LOW register independently
   if(Math.random()<0.45){
     setTimeout(function(){
       if(!playing)return;
-      var f=pickFreqs()[0]*0.25;
-      playVoice(f,25+Math.random()*15,0.1,'sine',2);
-    },2000+Math.random()*2000);
+      var n=pickFrom(reg.low,1)[0];
+      playNote(noteHz(n),24+Math.random()*14,0.11,'sine',2);
+    },1800+Math.random()*2000);
   }
 
-  // Layer 4: pad — slightly detuned, mid range
-  if(Math.random()<0.5){
+  // Layer 4: PAD — picks 1-2 notes from MID/HIGH, different from drone
+  if(Math.random()<0.55){
     setTimeout(function(){
       if(!playing)return;
-      var fs=pickFreqs();
-      fs.forEach(function(f){
-        playVoice(f*0.75,16+Math.random()*10,0.07,'triangle',15);
+      var pool=reg.mid.concat(reg.high);
+      var n=pickFrom(pool,1+Math.floor(Math.random()*2));
+      n.forEach(function(note){
+        playNote(noteHz(note),16+Math.random()*10,0.075,'triangle',12);
       });
     },Math.random()*3000);
   }
 
-  // Layer 5: extra voice when density high
-  if(tp.density>=2&&Math.random()<0.5){
+  // Layer 5: STRANGE accent — picks from ALL registers when strange>0
+  if(tp.strange>0&&Math.random()<0.35){
     setTimeout(function(){
       if(!playing)return;
-      playVoice(pickFreqs()[0]*1.5,12+Math.random()*8,0.05,'sine',3);
+      var n=pickFrom(reg.all,1)[0];
+      playNote(noteHz(n),10+Math.random()*8,0.04,Math.random()<0.5?'sine':'triangle',20);
     },Math.random()*4000);
   }
 
-  var t=setTimeout(schedule, interval*(0.7+Math.random()*0.6));
+  var t=setTimeout(schedule,interval*(0.7+Math.random()*0.6));
   timers.push(t);
 }
 
 function startGen(){timers.forEach(clearTimeout);timers=[];schedule();}
 function stopGen(){timers.forEach(clearTimeout);timers=[];}
-
 function setPlay(v){
   playing=v;
   document.getElementById('bPlay').textContent=v?'■■ stop':'▶ play';
   if(v)startGen();else stopGen();
 }
 
-// UI listeners
 document.getElementById('tones').addEventListener('click',function(e){
   var el=e.target;if(!el.classList.contains('tp'))return;
   var p=el.getAttribute('data-p'),d=+el.getAttribute('data-d');
   tp[p]=Math.max(-5,Math.min(5,tp[p]+d));
   document.getElementById('tv-'+p).textContent=tp[p];
-  if(window._eq){window._eq.bass.gain.value=2+tp.warmth*1.5;window._eq.treble.gain.value=-2+tp.treble*2;}
+  if(eqBass)eqBass.gain.value=2+tp.warmth*1.5;
+  if(eqTreble)eqTreble.gain.value=-1+tp.treble*2;
 });
 document.getElementById('bPlay').addEventListener('click',function(){if(started)setPlay(!playing);});
 document.getElementById('bScale').addEventListener('click',function(){si=(si+1)%SCALES.length;document.getElementById('bScale').textContent=SNAMES[si];});
@@ -234,11 +235,10 @@ document.getElementById('rb').addEventListener('click',function(){
   }
 });
 
-// START — iOS Safari compatible
+// iOS-safe start
 document.getElementById('sb').addEventListener('click',function(){
   if(started)return;
   ac=new AC();
-  // Play silent buffer to fully unlock iOS audio
   var buf=ac.createBuffer(1,1,ac.sampleRate);
   var src=ac.createBufferSource();src.buffer=buf;src.connect(ac.destination);src.start(0);
   buildGraph();
