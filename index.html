@@ -17,19 +17,19 @@ canvas{display:block;width:100%;height:100%;}
 #ml{position:absolute;top:8px;left:10px;font-size:8px;letter-spacing:2px;color:#bbb;text-transform:uppercase;}
 #rb{position:absolute;bottom:10px;right:10px;width:14px;height:14px;border-radius:50%;background:#a02020;border:1px solid #c03030;cursor:pointer;display:none;}
 #rt{position:absolute;bottom:10px;right:28px;font-size:8px;color:#bbb;line-height:14px;}
-.row{display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;justify-content:center;}
+.row{display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap;justify-content:center;}
 .col{display:flex;flex-direction:column;align-items:center;gap:5px;}
 .col label{font-size:7px;letter-spacing:1px;color:#aaa;text-transform:uppercase;}
-input[type=range]{writing-mode:vertical-lr;direction:rtl;width:2px;height:55px;accent-color:#888;cursor:pointer;}
-.btns{display:flex;gap:6px;flex-wrap:wrap;justify-content:center;}
-.btn{font-size:8px;letter-spacing:1px;color:#888;text-transform:uppercase;cursor:pointer;padding:6px 10px;border:1px solid #c5c2bb;background:#dddbd5;}
-.tones{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;}
+input[type=range]{writing-mode:vertical-lr;direction:rtl;width:2px;height:50px;accent-color:#888;cursor:pointer;}
+.btns{display:flex;gap:5px;flex-wrap:wrap;justify-content:center;}
+.btn{font-size:8px;letter-spacing:1px;color:#888;text-transform:uppercase;cursor:pointer;padding:5px 8px;border:1px solid #c5c2bb;background:#dddbd5;}
+.tones{display:flex;gap:4px;flex-wrap:wrap;justify-content:center;}
 .tg{display:flex;flex-direction:column;align-items:center;gap:2px;}
 .tg span{font-size:7px;color:#bbb;}
 .tv{font-size:7px;color:#999;}
 .tpair{display:flex;}
-.tp{width:22px;height:18px;background:#c8c5be;border:1px solid #aaa;font-size:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#777;user-select:none;}
-#keyinfo{font-size:7px;color:#bbb;letter-spacing:1px;text-align:center;}
+.tp{width:20px;height:17px;background:#c8c5be;border:1px solid #aaa;font-size:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;color:#777;user-select:none;}
+#hint{font-size:7px;color:#bbb;letter-spacing:1px;text-align:center;text-transform:uppercase;}
 </style>
 </head>
 <body>
@@ -40,7 +40,7 @@ input[type=range]{writing-mode:vertical-lr;direction:rtl;width:2px;height:55px;a
   <div id="rb"></div>
   <div id="rt"></div>
 </div>
-<div id="ui" style="display:none;flex-direction:column;align-items:center;gap:12px;width:min(340px,90vw);">
+<div id="ui" style="display:none;flex-direction:column;align-items:center;gap:11px;width:min(340px,90vw);">
   <div class="tones" id="tones">
     <div class="tg"><div class="tpair"><div class="tp" data-p="treble" data-d="1">1</div><div class="tp" data-p="treble" data-d="-1">2</div></div><span>treble</span><div class="tv" id="tv-treble">0</div></div>
     <div class="tg"><div class="tpair"><div class="tp" data-p="pitch" data-d="1">3</div><div class="tp" data-p="pitch" data-d="-1">4</div></div><span>pitch</span><div class="tv" id="tv-pitch">0</div></div>
@@ -52,19 +52,22 @@ input[type=range]{writing-mode:vertical-lr;direction:rtl;width:2px;height:55px;a
     <div class="col"><input type="range" id="sRev" min="0" max="0.95" step="0.01" value="0.8"><label>reverb</label></div>
     <div class="col"><input type="range" id="sDly" min="0" max="0.85" step="0.01" value="0.35"><label>delay</label></div>
     <div class="col"><input type="range" id="sRate" min="0.5" max="3" step="0.1" value="1"><label>rate</label></div>
+    <div class="col"><input type="range" id="sChaos" min="0" max="1" step="0.01" value="0.3"><label>chaos</label></div>
     <div class="col"><input type="range" id="sVol" min="0" max="1" step="0.01" value="0.7"><label>vol</label></div>
   </div>
   <div class="btns">
     <div class="btn" id="bPlay">stop</div>
     <div class="btn" id="bMode">mode: gen</div>
     <div class="btn" id="bScale">pentatonic</div>
+    <div class="btn" id="bTex">sine</div>
+    <div class="btn" id="bChord">chord: off</div>
   </div>
-  <div id="keyinfo">synth mode: a s d f g h j k l</div>
+  <div id="hint">space=mode · tab=scale · t=texture · c=chord · a-l=keys</div>
 </div>
 <script>
 var AC=window.AudioContext||window.webkitAudioContext;
-var ac,masterGain,reverbNode,reverbGain,delayNode,delayGain,an;
-var genPlaying=false,mode='gen',si=0;
+var ac,masterGain,reverbNode,reverbGain,delayNode,delayGain,eqBass,eqTreble,an;
+var genPlaying=false,mode='gen',si=0,ti=0,chordOn=false;
 var t1=null,t2=null,t3=null,t4=null;
 var tp={treble:0,pitch:0,strange:0,warmth:0,density:0};
 var keyNodes={};
@@ -73,14 +76,16 @@ var N=24,pts=[],en=0,sm=0;
 for(var i=0;i<N;i++) pts.push({a:(i/N)*Math.PI*2,r:0.4,v:0,p1:Math.random()*6.28,p2:Math.random()*6.28});
 
 var SCALES=[
-  {n:'pentatonic',low:[65.41,98.00,82.41,110.00],mid:[130.81,164.81,196.00,220.00,246.94,174.61],high:[329.63,392.00,493.88,440.00,523.25,369.99]},
-  {n:'dorian',    low:[73.42,110.00,87.31,97.99], mid:[146.83,174.61,220.00,261.63,195.00,155.56],high:[293.66,349.23,440.00,523.25,391.99,415.30]},
-  {n:'lydian',    low:[87.31,130.81,110.00,82.41],mid:[174.61,220.00,261.63,329.63,196.00,246.94],high:[349.23,440.00,523.25,659.25,392.00,493.88]},
-  {n:'minor pent',low:[110.00,82.41,65.41,98.00], mid:[220.00,261.63,146.83,196.00,164.81,174.61],high:[440.00,523.25,293.66,392.00,329.63,349.23]},
-  {n:'blues',     low:[65.41,98.00,77.78,87.31],  mid:[130.81,155.56,174.61,196.00,233.08,138.59],high:[261.63,311.13,349.23,392.00,466.16,277.18]},
-  {n:'whole tone',low:[130.81,146.83,164.81,110], mid:[174.61,207.65,233.08,261.63,146.83,195.00],high:[329.63,369.99,415.30,466.16,523.25,311.13]}
+  {n:'pentatonic',low:[65.41,98.00,82.41,110.00],      mid:[130.81,164.81,196.00,220.00,246.94,174.61],  high:[329.63,392.00,493.88,440.00,523.25,369.99]},
+  {n:'dorian',    low:[73.42,110.00,87.31,97.99],       mid:[146.83,174.61,220.00,261.63,195.00,155.56],  high:[293.66,349.23,440.00,523.25,391.99,415.30]},
+  {n:'lydian',    low:[87.31,130.81,110.00,82.41],      mid:[174.61,220.00,261.63,329.63,196.00,246.94],  high:[349.23,440.00,523.25,659.25,392.00,493.88]},
+  {n:'minor pent',low:[110.00,82.41,65.41,98.00],       mid:[220.00,261.63,146.83,196.00,164.81,174.61],  high:[440.00,523.25,293.66,392.00,329.63,349.23]},
+  {n:'blues',     low:[65.41,98.00,77.78,87.31],        mid:[130.81,155.56,174.61,196.00,233.08,138.59],  high:[261.63,311.13,349.23,392.00,466.16,277.18]},
+  {n:'whole tone',low:[130.81,146.83,164.81,110.00],    mid:[174.61,207.65,233.08,261.63,146.83,195.00],  high:[329.63,369.99,415.30,466.16,523.25,311.13]}
 ];
-
+var CHORDS_OFFSETS=[[1],[1,1.5],[1,1.25,1.5],[1,1.189,1.498],[1,1.335,1.587]];
+var WAVE_TYPES=['sine','triangle','sawtooth'];
+var WAVE_NAMES=['sine','triangle','saw'];
 var KEY_FREQS={a:261.63,s:293.66,d:329.63,f:392.00,g:440.00,h:523.25,j:587.33,k:659.25,l:783.99};
 
 function rnd(arr){return arr[Math.floor(Math.random()*arr.length)];}
@@ -95,28 +100,26 @@ function makeReverb(){
 
 function buildGraph(){
   masterGain=ac.createGain();masterGain.gain.value=gp('sVol');
+  eqBass=ac.createBiquadFilter();eqBass.type='lowshelf';eqBass.frequency.value=200;eqBass.gain.value=2;
+  eqTreble=ac.createBiquadFilter();eqTreble.type='highshelf';eqTreble.frequency.value=4000;eqTreble.gain.value=-1;
   reverbNode=makeReverb();
   reverbGain=ac.createGain();reverbGain.gain.value=gp('sRev');
   delayNode=ac.createDelay(2.0);delayNode.delayTime.value=0.4;
   delayGain=ac.createGain();delayGain.gain.value=gp('sDly');
   var dlyFb=ac.createGain();dlyFb.gain.value=0.3;
-  delayNode.connect(dlyFb);dlyFb.connect(delayNode);
-  delayNode.connect(delayGain);
+  delayNode.connect(dlyFb);dlyFb.connect(delayNode);delayNode.connect(delayGain);
   an=ac.createAnalyser();an.fftSize=256;
-  masterGain.connect(reverbNode);
-  masterGain.connect(delayNode);
-  reverbNode.connect(reverbGain);
-  reverbGain.connect(an);
+  masterGain.connect(eqBass);eqBass.connect(eqTreble);
+  eqTreble.connect(reverbNode);eqTreble.connect(delayNode);eqTreble.connect(an);
+  reverbNode.connect(reverbGain);reverbGain.connect(an);
   delayGain.connect(an);
-  masterGain.connect(an);
   an.connect(ac.destination);
 }
 
 function note(freq,dur,vol,wave){
   if(!ac)return;
-  // apply pitch shift from tp
   var pitchMult=Math.pow(2,tp.pitch/12);
-  freq=freq*pitchMult;
+  freq*=pitchMult;
   var now=ac.currentTime;
   var atk=0.8+Math.random()*0.8;
   var rel=5+Math.random()*4;
@@ -127,11 +130,12 @@ function note(freq,dur,vol,wave){
   g.gain.setValueAtTime(vol,now+dur-rel);
   g.gain.exponentialRampToValueAtTime(0.001,now+dur);
   g.connect(masterGain);
+  var detuneMult=1+tp.strange*0.008;
   [-7,0,7].forEach(function(dt){
     var o=ac.createOscillator();
-    o.type=wave||'sine';
+    o.type=wave||WAVE_TYPES[ti];
     o.frequency.value=freq;
-    o.detune.value=dt+(Math.random()*4-2)+(tp.strange*15);
+    o.detune.value=(dt*detuneMult)+(Math.random()*4-2);
     o.connect(g);o.start(now);o.stop(now+dur);
     o.onended=function(){try{o.disconnect();}catch(e){}};
   });
@@ -143,15 +147,20 @@ function note(freq,dur,vol,wave){
   lfo.start(now);lfo.stop(now+dur);
 }
 
+function playChord(baseFreq,dur,vol,wave){
+  var offsets=chordOn?rnd(CHORDS_OFFSETS):[1];
+  offsets.forEach(function(o){note(baseFreq*o,dur,vol*(1/offsets.length),wave);});
+}
+
 function runDrone(){
   if(!genPlaying)return;
   var cnt=1+Math.max(0,Math.round(tp.density/2));
-  for(var i=0;i<cnt;i++) note(rnd(SCALES[si].mid),14+Math.random()*8,0.13,'sine');
+  for(var i=0;i<cnt;i++) playChord(rnd(SCALES[si].mid),14+Math.random()*8,0.13,WAVE_TYPES[ti]);
   t1=setTimeout(runDrone,(3+gp('sRate')*2)*1000*(0.7+Math.random()*0.5));
 }
 function runShimmer(){
   if(!genPlaying)return;
-  if(Math.random()<0.85) note(rnd(SCALES[si].high),10+Math.random()*8,0.07,'sine');
+  if(Math.random()<0.85) playChord(rnd(SCALES[si].high),10+Math.random()*8,0.07,'sine');
   t2=setTimeout(runShimmer,(4+gp('sRate')*1.5)*1000*(0.6+Math.random()*0.6));
 }
 function runSub(){
@@ -163,7 +172,7 @@ function runPad(){
   if(!genPlaying)return;
   if(Math.random()<0.75){
     var pool=SCALES[si].mid.concat(SCALES[si].high);
-    note(rnd(pool),12+Math.random()*8,0.08,'triangle');
+    playChord(rnd(pool),12+Math.random()*8,0.08,'triangle');
   }
   t4=setTimeout(runPad,(3.5+gp('sRate')*2)*1000*(0.6+Math.random()*0.7));
 }
@@ -179,25 +188,23 @@ function stopGen(){
   genPlaying=false;
   clearTimeout(t1);clearTimeout(t2);clearTimeout(t3);clearTimeout(t4);
 }
-
 function setMode(m){
   mode=m;
   document.getElementById('bMode').textContent='mode: '+m;
   document.getElementById('ml').textContent=m;
   if(m==='gen')startGen();else stopGen();
 }
-
-function adjTone(p,d){
-  tp[p]=Math.max(-5,Math.min(5,tp[p]+d));
-  document.getElementById('tv-'+p).textContent=tp[p];
-  if(an){
-    // apply treble/warmth via masterGain EQ approximation
-  }
+function applyTone(){
+  if(eqTreble)eqTreble.gain.value=-1+tp.treble*2;
+  if(eqBass)eqBass.gain.value=2+tp.warmth*1.5;
 }
 
 document.getElementById('tones').addEventListener('click',function(e){
   var el=e.target;if(!el.classList.contains('tp'))return;
-  adjTone(el.getAttribute('data-p'),+el.getAttribute('data-d'));
+  var p=el.getAttribute('data-p'),d=+el.getAttribute('data-d');
+  tp[p]=Math.max(-5,Math.min(5,tp[p]+d));
+  document.getElementById('tv-'+p).textContent=tp[p];
+  applyTone();
 });
 document.getElementById('bPlay').addEventListener('click',function(){
   if(genPlaying){stopGen();this.textContent='play';}
@@ -205,6 +212,8 @@ document.getElementById('bPlay').addEventListener('click',function(){
 });
 document.getElementById('bMode').addEventListener('click',function(){setMode(mode==='gen'?'synth':'gen');});
 document.getElementById('bScale').addEventListener('click',function(){si=(si+1)%SCALES.length;this.textContent=SCALES[si].n;});
+document.getElementById('bTex').addEventListener('click',function(){ti=(ti+1)%WAVE_TYPES.length;this.textContent=WAVE_NAMES[ti];});
+document.getElementById('bChord').addEventListener('click',function(){chordOn=!chordOn;this.textContent='chord: '+(chordOn?'on':'off');});
 document.getElementById('sVol').addEventListener('input',function(e){if(masterGain)masterGain.gain.value=+e.target.value;});
 document.getElementById('sRev').addEventListener('input',function(e){if(reverbGain)reverbGain.gain.value=+e.target.value;});
 document.getElementById('sDly').addEventListener('input',function(e){if(delayGain)delayGain.gain.value=+e.target.value;});
@@ -213,6 +222,9 @@ document.getElementById('sRate').addEventListener('input',function(){if(genPlayi
 document.addEventListener('keydown',function(e){
   if(e.repeat||!ac)return;
   if(e.code==='Space'){e.preventDefault();setMode(mode==='gen'?'synth':'gen');return;}
+  if(e.code==='Tab'){e.preventDefault();si=(si+1)%SCALES.length;document.getElementById('bScale').textContent=SCALES[si].n;return;}
+  if(e.key==='t'||e.key==='T'){ti=(ti+1)%WAVE_TYPES.length;document.getElementById('bTex').textContent=WAVE_NAMES[ti];return;}
+  if(e.key==='c'||e.key==='C'){chordOn=!chordOn;document.getElementById('bChord').textContent='chord: '+(chordOn?'on':'off');return;}
   if(mode!=='synth')return;
   var freq=KEY_FREQS[e.key.toLowerCase()];
   if(!freq||keyNodes[e.key])return;
@@ -221,17 +233,15 @@ document.addEventListener('keydown',function(e){
   g.gain.setValueAtTime(0.001,now);g.gain.linearRampToValueAtTime(0.2,now+0.3);
   g.connect(masterGain);
   var oscs=[-6,0,6].map(function(dt){
-    var o=ac.createOscillator();o.type='triangle';
-    o.frequency.value=freq;o.detune.value=dt;
-    o.connect(g);o.start(now);return o;
+    var o=ac.createOscillator();o.type=WAVE_TYPES[ti];
+    o.frequency.value=freq;o.detune.value=dt;o.connect(g);o.start(now);return o;
   });
   keyNodes[e.key]={g:g,oscs:oscs};
 });
 document.addEventListener('keyup',function(e){
   var kn=keyNodes[e.key];if(!kn||!ac)return;
   var now=ac.currentTime;
-  kn.g.gain.cancelScheduledValues(now);
-  kn.g.gain.setValueAtTime(kn.g.gain.value,now);
+  kn.g.gain.cancelScheduledValues(now);kn.g.gain.setValueAtTime(kn.g.gain.value,now);
   kn.g.gain.linearRampToValueAtTime(0.001,now+2.5);
   kn.oscs.forEach(function(o){try{o.stop(now+2.6);}catch(e){}});
   delete keyNodes[e.key];
