@@ -49,7 +49,7 @@ input[type=range]{writing-mode:vertical-lr;direction:rtl;width:2px;height:50px;a
     <div class="tg"><div class="tpair"><div class="tp" data-p="density" data-d="1">9</div><div class="tp" data-p="density" data-d="-1">0</div></div><span>density</span><div class="tv" id="tv-density">0</div></div>
   </div>
   <div class="row">
-    <div class="col"><input type="range" id="sRev" min="0" max="0.95" step="0.01" value="0.8"><label>reverb</label></div>
+    <div class="col"><input type="range" id="sRev" min="0" max="0.95" step="0.01" value="0.85"><label>reverb</label></div>
     <div class="col"><input type="range" id="sDly" min="0" max="0.85" step="0.01" value="0.35"><label>delay</label></div>
     <div class="col"><input type="range" id="sRate" min="0.5" max="3" step="0.1" value="1"><label>rate</label></div>
     <div class="col"><input type="range" id="sChaos" min="0" max="1" step="0.01" value="0.3"><label>chaos</label></div>
@@ -84,15 +84,18 @@ var SCALES=[
   {n:'whole tone',low:[130.81,146.83,164.81,110.00],    mid:[174.61,207.65,233.08,261.63,146.83,195.00],  high:[329.63,369.99,415.30,466.16,523.25,311.13]}
 ];
 var CHORDS_OFFSETS=[[1],[1,1.5],[1,1.25,1.5],[1,1.189,1.498],[1,1.335,1.587]];
-var WAVE_TYPES=['sine','triangle','sawtooth'];
-var WAVE_NAMES=['sine','triangle','saw'];
+
+// Warm textures only — no harsh sawtooth
+var WAVE_TYPES=['sine','sine','triangle','triangle'];
+var WAVE_NAMES=['sine','sine 2','triangle','triangle 2'];
+
 var KEY_FREQS={a:261.63,s:293.66,d:329.63,f:392.00,g:440.00,h:523.25,j:587.33,k:659.25,l:783.99};
 
 function rnd(arr){return arr[Math.floor(Math.random()*arr.length)];}
 function gp(id){return parseFloat(document.getElementById(id).value);}
 
 function makeReverb(){
-  var secs=10,len=ac.sampleRate*secs;
+  var secs=12,len=ac.sampleRate*secs;
   var buf=ac.createBuffer(2,len,ac.sampleRate);
   for(var c=0;c<2;c++){var d=buf.getChannelData(c);for(var i=0;i<len;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/len,2);}
   var conv=ac.createConvolver();conv.buffer=buf;return conv;
@@ -100,8 +103,9 @@ function makeReverb(){
 
 function buildGraph(){
   masterGain=ac.createGain();masterGain.gain.value=gp('sVol');
-  eqBass=ac.createBiquadFilter();eqBass.type='lowshelf';eqBass.frequency.value=200;eqBass.gain.value=2;
-  eqTreble=ac.createBiquadFilter();eqTreble.type='highshelf';eqTreble.frequency.value=4000;eqTreble.gain.value=-1;
+  eqBass=ac.createBiquadFilter();eqBass.type='lowshelf';eqBass.frequency.value=200;eqBass.gain.value=3;
+  eqTreble=ac.createBiquadFilter();eqTreble.type='highshelf';eqTreble.frequency.value=3000;eqTreble.gain.value=-4;
+  var eqMid=ac.createBiquadFilter();eqMid.type='peaking';eqMid.frequency.value=800;eqMid.gain.value=1;eqMid.Q.value=0.8;
   reverbNode=makeReverb();
   reverbGain=ac.createGain();reverbGain.gain.value=gp('sRev');
   delayNode=ac.createDelay(2.0);delayNode.delayTime.value=0.4;
@@ -109,8 +113,8 @@ function buildGraph(){
   var dlyFb=ac.createGain();dlyFb.gain.value=0.3;
   delayNode.connect(dlyFb);dlyFb.connect(delayNode);delayNode.connect(delayGain);
   an=ac.createAnalyser();an.fftSize=256;
-  masterGain.connect(eqBass);eqBass.connect(eqTreble);
-  eqTreble.connect(reverbNode);eqTreble.connect(delayNode);eqTreble.connect(an);
+  masterGain.connect(eqBass);eqBass.connect(eqTreble);eqTreble.connect(eqMid);
+  eqMid.connect(reverbNode);eqMid.connect(delayNode);eqMid.connect(an);
   reverbNode.connect(reverbGain);reverbGain.connect(an);
   delayGain.connect(an);
   an.connect(ac.destination);
@@ -130,19 +134,21 @@ function note(freq,dur,vol,wave){
   g.gain.setValueAtTime(vol,now+dur-rel);
   g.gain.exponentialRampToValueAtTime(0.001,now+dur);
   g.connect(masterGain);
-  var detuneMult=1+tp.strange*0.008;
-  [-7,0,7].forEach(function(dt){
+  // Soft detuning — [-4,0,4] instead of [-7,0,7] for warmth
+  var detune=3+tp.strange*2;
+  [-detune,0,detune].forEach(function(dt){
     var o=ac.createOscillator();
-    o.type=wave||WAVE_TYPES[ti];
+    o.type=wave||'sine';
     o.frequency.value=freq;
-    o.detune.value=(dt*detuneMult)+(Math.random()*4-2);
+    o.detune.value=dt+(Math.random()*2-1);
     o.connect(g);o.start(now);o.stop(now+dur);
     o.onended=function(){try{o.disconnect();}catch(e){}};
   });
+  // Gentle tremolo
   var lfo=ac.createOscillator();
   var lfoG=ac.createGain();
-  lfo.frequency.value=0.05+Math.random()*0.08;
-  lfoG.gain.value=freq*0.004;
+  lfo.frequency.value=0.04+Math.random()*0.06;
+  lfoG.gain.value=vol*0.08;
   lfo.connect(lfoG);lfoG.connect(g.gain);
   lfo.start(now);lfo.stop(now+dur);
 }
@@ -152,27 +158,29 @@ function playChord(baseFreq,dur,vol,wave){
   offsets.forEach(function(o){note(baseFreq*o,dur,vol*(1/offsets.length),wave);});
 }
 
+function getWave(){return WAVE_TYPES[ti];}
+
 function runDrone(){
   if(!genPlaying)return;
   var cnt=1+Math.max(0,Math.round(tp.density/2));
-  for(var i=0;i<cnt;i++) playChord(rnd(SCALES[si].mid),14+Math.random()*8,0.13,WAVE_TYPES[ti]);
+  for(var i=0;i<cnt;i++) playChord(rnd(SCALES[si].mid),14+Math.random()*8,0.13,getWave());
   t1=setTimeout(runDrone,(3+gp('sRate')*2)*1000*(0.7+Math.random()*0.5));
 }
 function runShimmer(){
   if(!genPlaying)return;
-  if(Math.random()<0.85) playChord(rnd(SCALES[si].high),10+Math.random()*8,0.07,'sine');
+  if(Math.random()<0.85) playChord(rnd(SCALES[si].high),10+Math.random()*8,0.06,'sine');
   t2=setTimeout(runShimmer,(4+gp('sRate')*1.5)*1000*(0.6+Math.random()*0.6));
 }
 function runSub(){
   if(!genPlaying)return;
-  if(Math.random()<0.7) note(rnd(SCALES[si].low),18+Math.random()*10,0.12,'sine');
+  if(Math.random()<0.7) note(rnd(SCALES[si].low),18+Math.random()*10,0.11,'sine');
   t3=setTimeout(runSub,(5+gp('sRate')*2)*1000*(0.7+Math.random()*0.5));
 }
 function runPad(){
   if(!genPlaying)return;
   if(Math.random()<0.75){
     var pool=SCALES[si].mid.concat(SCALES[si].high);
-    playChord(rnd(pool),12+Math.random()*8,0.08,'triangle');
+    playChord(rnd(pool),12+Math.random()*8,0.07,'triangle');
   }
   t4=setTimeout(runPad,(3.5+gp('sRate')*2)*1000*(0.6+Math.random()*0.7));
 }
@@ -195,8 +203,8 @@ function setMode(m){
   if(m==='gen')startGen();else stopGen();
 }
 function applyTone(){
-  if(eqTreble)eqTreble.gain.value=-1+tp.treble*2;
-  if(eqBass)eqBass.gain.value=2+tp.warmth*1.5;
+  if(eqTreble)eqTreble.gain.value=-4+tp.treble*2;
+  if(eqBass)eqBass.gain.value=3+tp.warmth*1.5;
 }
 
 document.getElementById('tones').addEventListener('click',function(e){
@@ -230,10 +238,10 @@ document.addEventListener('keydown',function(e){
   if(!freq||keyNodes[e.key])return;
   var now=ac.currentTime;
   var g=ac.createGain();
-  g.gain.setValueAtTime(0.001,now);g.gain.linearRampToValueAtTime(0.2,now+0.3);
+  g.gain.setValueAtTime(0.001,now);g.gain.linearRampToValueAtTime(0.18,now+0.4);
   g.connect(masterGain);
-  var oscs=[-6,0,6].map(function(dt){
-    var o=ac.createOscillator();o.type=WAVE_TYPES[ti];
+  var oscs=[-4,0,4].map(function(dt){
+    var o=ac.createOscillator();o.type='triangle';
     o.frequency.value=freq;o.detune.value=dt;o.connect(g);o.start(now);return o;
   });
   keyNodes[e.key]={g:g,oscs:oscs};
@@ -242,8 +250,8 @@ document.addEventListener('keyup',function(e){
   var kn=keyNodes[e.key];if(!kn||!ac)return;
   var now=ac.currentTime;
   kn.g.gain.cancelScheduledValues(now);kn.g.gain.setValueAtTime(kn.g.gain.value,now);
-  kn.g.gain.linearRampToValueAtTime(0.001,now+2.5);
-  kn.oscs.forEach(function(o){try{o.stop(now+2.6);}catch(e){}});
+  kn.g.gain.linearRampToValueAtTime(0.001,now+3);
+  kn.oscs.forEach(function(o){try{o.stop(now+3.1);}catch(e){}});
   delete keyNodes[e.key];
 });
 
